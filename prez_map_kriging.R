@@ -324,3 +324,132 @@ ggsave(
   height = 10,                                # alto en pulgadas
   dpi = 300                                   # resolución (para imprimir/publicar)
 )
+
+############# KLIMATOLOGIA ETA ANOMALIA #####################
+library(terra)
+# Cargar climatologias de WordClim  de marzo en carpeta wc2
+climatologia <- rast("wc2/wc2.1_30s_prec_03.tif")
+
+# Recortar la climatología al área de Euskal Herria
+climatologia_crop <- crop(climatologia, eh)
+climatologia_masked <- mask(climatologia_crop, eh)
+
+# Plotear la climatología con ggplot
+climatologia_df <- as.data.frame(climatologia_masked, xy = TRUE, na.rm = TRUE)
+# Rename column to prec_03
+names(climatologia_df)[3] <- "prec"
+
+p_klima <- ggplot() +
+  geom_raster(data = climatologia_df, aes(x = x, y = y, fill = prec)) +
+  geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.075) +
+  geom_sf(data = eh, fill = NA, color = "black", lwd = 0.6) +
+  scale_fill_gradientn(colors = cols, 
+                       breaks = breaks_vals, 
+                       limits = c(0, 300), 
+                       oob = scales::squish,
+                       name = "(mm)") +
+  labs(title = "Batez besteko prezipitazioa", subtitle = "Martxoa (1970-2000) | WorldClim") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.key.width = unit(1.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 24, face = "bold", margin = margin(t = 10, b = 5)),
+        plot.subtitle = element_text(hjust = 0.5, size = 14, margin = margin(t = 0, b = 5))
+        )
+
+p_klima
+
+################### Cokriging 2 ###################
+# Realizar el mismo cokriging pero con las dimensiones de la climatología para poder comparar ambos mapas.
+new_grid <- as.data.frame(climatologia_masked, xy = TRUE, na.rm = TRUE)
+names(new_grid)[3] <- "altitud_dem"
+coordinates(new_grid) <- ~x+y
+proj4string(new_grid) <- crs(climatologia_masked)
+
+# Realizar cokriging con la nueva grid
+cokriging_result_2 <- predict(vg_fit, newdata = new_grid)
+
+# Convertir resultado a raster
+df_co2 <- as.data.frame(cokriging_result_2)
+cokriging_raster_2 <- rast(df_co2[, c("x", "y", "prec.pred")], type = "xyz")
+crs(cokriging_raster_2) <- crs(climatologia_masked)
+plot(cokriging_raster_2)
+lines(eh, col = "black")
+
+# Plotear el resultado del cokriging con la nueva grid
+cokriging_df2 <- as.data.frame(cokriging_raster_2, xy = TRUE, na.rm = TRUE) 
+
+p3 <- ggplot() +
+  geom_raster(data = cokriging_df2, aes(x = x, y = y, fill = prec.pred)) +
+  geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.075) +
+  geom_sf(data = eh, fill = NA, color = "black", lwd = 0.6) +
+  scale_fill_gradientn(colors = cols, 
+                       breaks = breaks_vals, 
+                       limits = c(0, 300), 
+                       oob = scales::squish,
+                       name = "(mm)") +
+  labs(title = "Prezipitazioa Martxoan", subtitle = "Cokriging") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.key.width = unit(1.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 24, face = "bold", margin = margin(t = 10, b = 5)),
+        plot.subtitle = element_text(hjust = 0.5, size = 14, margin = margin(t = 0, b = 5))
+  ) 
+
+p3
+
+################### Anomalia #####################
+library(scales)
+# Calcular la anomalía restando la climatología al resultado del cokriging
+anomalia <- cokriging_raster_2 / climatologia_masked * 100
+
+# Plotear la anomalía
+anomalia_df <- as.data.frame(anomalia, xy = TRUE, na.rm = TRUE)
+names(anomalia_df)[3] <- "anomalia"
+
+# Crear paleta de colores para la anomalía que sea discreta y que vaya de amarillo (valores negativos) a blanco (0) y a azul oscuro (valores positivos)
+breaks <- c(0, 20, 40, 60, 80, 120, 140, 160, 180, 200)
+cols <- c("#330000", "#663301", "#996633", "#cc9965", "#ffffff", "#ccccff", "#9999ff", "#3366ff", "#000099")
+
+# Plotear la anomalía con ggplot y la paleta de colores creada, con límites de -100% a 100% y con una leyenda que indique que los valores representan el porcentaje de anomalía respecto a la climatología.
+p_anomalia <- ggplot() +
+  geom_raster(data = anomalia_df, aes(x = x, y = y, fill = anomalia)) +
+  geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.075) +
+  geom_sf(data = eh, fill = NA, color = "black", lwd = 0.6) +
+  scale_fill_stepsn(
+            colors = cols,
+            breaks = breaks,
+            limits = c(0, 200),
+            oob = scales::squish,
+            name = "Anomalia (%)") +
+  labs(title = "Prezipitazioaren anomalia", subtitle = "2026ko Martxoa") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        legend.key.width = unit(1.5, "cm"),
+        legend.key.height = unit(0.5, "cm"),
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 24, face = "bold", margin = margin(t = 10, b = 5)),
+        plot.subtitle = element_text(hjust = 0.5, size = 14, margin = margin(t = 0, b = 5))
+  )
+p_anomalia
+
+# Guardar el plot de la anomalía
+ggsave( 
+  filename = "anomalia_martxoa.png",         # nombre del archivo
+  plot = p_anomalia,                                  # plot a guardar
+  width = 8,                                  # ancho en pulgadas
+  height = 10,                                # alto en pulgadas
+  dpi = 300                                   # resolución (para imprimir/publicar)
+)
