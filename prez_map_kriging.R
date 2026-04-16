@@ -149,13 +149,13 @@ stations_ipa <- json$data
 stations_ipa <- as.data.frame(stations)
 head(stations_ipa)
 
-iparralde <- stations_ipa %>% filter(data.dept == "64")
+iparralde <- stations_ipa %>% filter(dept == "64")
 
 
 # Try a single station to see how the data is structured
 library(rvest)
-station_id <- iparralde$data.stationid[10]
-station_name <- iparralde$data.name[10]
+station_id <- iparralde$stationid[10]
+station_name <- iparralde$name[10]
 url_data <- paste0("https://www.infoclimat.fr/climatologie/annee/2026/", station_name, "/valeurs/", station_id, ".html")
 # Read the HTML content of the page
 res_data <- GET(url_data)
@@ -168,14 +168,15 @@ tables[[1]]
 # Extraer precipitacion (CumulPrécips) de Marzo (columna mars2026)
 precip_mars <- tables[[1]]$mars2026[14] # La fila 13 o 14 corresponde a CumulPrécips
 
+library(rvest)
 # Repetir para todas las estaciones de iparralde y obtener sus datos de precipitación de marzo
 iparralde_data <- data.frame()
 
 year <- 2026
 
 for (i in 1:nrow(iparralde)) {
-  station_id <- iparralde$data.stationid[i]
-  station_name <- iparralde$data.name[i]
+  station_id <- iparralde$stationid[i]
+  station_name <- iparralde$name[i]
   
   station_name_clean <- URLencode(station_name, reserved = TRUE)
   
@@ -202,7 +203,8 @@ for (i in 1:nrow(iparralde)) {
     fila_cumul <- which(grepl("Cumul|Total|Somme", tabla[[1]], ignore.case = TRUE))
     
     if (length(fila_cumul) > 0) {
-      precip_mars <- tabla[fila_cumul[1], 2]
+      precip_mars <- tabla$mars2026[fila_cumul[1]]
+      print(paste("Estación:", station_name, "- Precipitación marzo:", precip_mars))
       
       # 🧹 Limpieza
       precip_mars <- gsub(",", ".", precip_mars)
@@ -213,14 +215,14 @@ for (i in 1:nrow(iparralde)) {
       warning(paste("No se encontró Cumul en", station_name))
       precip_mars <- NA
     }
-    
+
     iparralde_data <- rbind(
       iparralde_data,
       data.frame(
         estacion = station_name,
         precipitacion_mes = precip_mars,
-        latitud = iparralde$data.latitude[i],
-        longitud = iparralde$data.longitude[i]
+        latitud = iparralde$latitude[i],
+        longitud = iparralde$longitude[i]
       )
     )
   }
@@ -344,6 +346,14 @@ climatologia_df <- as.data.frame(climatologia_masked, xy = TRUE, na.rm = TRUE)
 # Rename column to prec_03
 names(climatologia_df)[3] <- "prec"
 
+# Crear paleta de colores
+my_palette <- colorRampPalette(c("white", "#ffffd9", "#c8e9b4", "#41b6c4", 
+                                 "#1b91c0", "#225ea8","#0d2c84", "#d100d1"))
+cols <- my_palette(100)   # 100 colores
+
+# Define ranges for breaks
+breaks_vals <- seq(0, 300, by = 50)
+
 p_klima <- ggplot() +
   geom_raster(data = climatologia_df, aes(x = x, y = y, fill = prec)) +
   geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.075) +
@@ -388,7 +398,7 @@ data_sf <- st_as_sf(data, coords = c("longitud", "latitud"), crs = 4326)
 
 # Extraer altitud para cada estación de datos de precipitación
 coords <- vect(data_sf)
-data_sf$altitud_dem <- extract(dem, coords)[,2]
+data_sf$altitud_dem <- terra::extract(dem, coords)[,2]
 data_clean <- data_sf %>% filter(!is.na(altitud_dem))
 
 # Convertir a SpatialPointsDataFrame para gstat
@@ -433,7 +443,7 @@ breaks_vals <- seq(0, 300, by = 50)
 
 p3 <- ggplot() +
   geom_raster(data = cokriging_df2, aes(x = x, y = y, fill = prec.pred)) +
-  geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.075) +
+  geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.3) +
   geom_sf(data = eh, fill = NA, color = "black", lwd = 0.6) +
   scale_fill_gradientn(colors = cols1, 
                        breaks = breaks_vals, 
@@ -475,14 +485,14 @@ anomalia <- cokriging_raster_2 / climatologia_masked * 100
 anomalia_df <- as.data.frame(anomalia, xy = TRUE, na.rm = TRUE)
 names(anomalia_df)[3] <- "anomalia"
 
-# Crear paleta de colores para la anomalía que sea discreta y que vaya de amarillo (valores negativos) a blanco (0) y a azul oscuro (valores positivos)
+# Crear paleta de colores para la anomalía que sea discreta 
 breaks <- c(0, 20, 40, 60, 80, 120, 140, 160, 180, 200)
 cols <- c("#330000", "#663301", "#996633", "#cc9965", "#ffffff", "#ccccff", "#9999ff", "#3366ff", "#000099")
 
 # Plotear la anomalía con ggplot y la paleta de colores creada, con límites de -100% a 100% y con una leyenda que indique que los valores representan el porcentaje de anomalía respecto a la climatología.
 p_anomalia <- ggplot() +
   geom_raster(data = anomalia_df, aes(x = x, y = y, fill = anomalia)) +
-  geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.075) +
+  geom_sf(data = herrialdeak, fill = NA, color = "black", lwd = 0.3) +
   geom_sf(data = eh, fill = NA, color = "black", lwd = 0.6) +
   scale_fill_stepsn(
             colors = cols,
